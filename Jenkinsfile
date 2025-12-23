@@ -35,8 +35,18 @@ pipeline {
                 echo 'Checking Docker and Docker Compose availability...'
                 sh """
                     set -euo pipefail
+                    echo "Checking Docker CLI..."
+                    if ! docker --version; then
+                        echo "ERROR: Docker CLI недоступен"
+                        exit 1
+                    fi
+                    echo "Checking Docker daemon connection..."
+                    if ! docker ps >/dev/null 2>&1; then
+                        echo "ERROR: Не удается подключиться к Docker daemon"
+                        exit 1
+                    fi
                     echo "Docker version:"
-                    docker version --format '{{.Server.Version}}' || (echo "ERROR: Docker недоступен" && exit 1)
+                    docker version
                     echo "Docker Compose version:"
                     docker compose version || (echo "ERROR: Docker Compose недоступен" && exit 1)
                     echo "Preflight checks passed"

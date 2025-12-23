@@ -94,7 +94,18 @@ Pipeline состоит из следующих stages:
 
 ### Подготовка к запуску
 
-Перед первым запуском Jenkins необходимо получить GID группы Docker для корректного доступа к Docker socket:
+Jenkins настроен для запуска от root (для демо-окружения), что обеспечивает доступ к Docker socket без дополнительных настроек прав.
+
+**Запуск Jenkins:**
+
+```bash
+# Простой запуск (DOCKER_GID не требуется, т.к. Jenkins запускается от root)
+docker compose up -d --build jenkins
+```
+
+**Примечание:** В продакшене рекомендуется использовать запуск от пользователя `jenkins` с правильной настройкой `group_add` и `DOCKER_GID`. Для демо-окружения запуск от root упрощает настройку.
+
+**Если нужно использовать запуск от пользователя jenkins (альтернативный вариант):**
 
 ```bash
 # Получить GID группы Docker
@@ -105,13 +116,19 @@ echo "DOCKER_GID=$DOCKER_GID"
 DOCKER_GID=$DOCKER_GID docker compose up -d --build jenkins
 ```
 
-Важно: если `DOCKER_GID` не задан, `docker compose` подставит пустое значение и Jenkins может получить `permission denied` при доступе к `/var/run/docker.sock`.
-
 Или установить переменную окружения в `.env` файл:
 
 ```bash
 echo "DOCKER_GID=$(stat -c %g /var/run/docker.sock)" > .env
 docker compose up -d --build jenkins
+```
+
+**Важно:** Если Jenkins уже запущен и вы обновили `fix-permissions.sh`, необходимо пересобрать контейнер:
+
+```bash
+docker compose stop jenkins
+docker compose build jenkins
+docker compose up -d jenkins
 ```
 
 ### Первоначальная настройка Jenkins
