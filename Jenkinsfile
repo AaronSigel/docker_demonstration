@@ -25,8 +25,20 @@ pipeline {
     stages {
         stage('Checkout') {
             steps {
-                echo 'Checking out repository...'
-                checkout scm
+                echo 'Repository already checked out by Jenkins (Pipeline script from SCM)'
+                script {
+                    // Проверяем, что мы в git репозитории
+                    sh """
+                        if [ -d .git ]; then
+                            echo "Git repository detected. Current commit:"
+                            git rev-parse HEAD
+                            echo "Current branch:"
+                            git rev-parse --abbrev-ref HEAD
+                        else
+                            echo "WARNING: .git directory not found, but this is expected for Pipeline script from SCM"
+                        fi
+                    """
+                }
             }
         }
 
