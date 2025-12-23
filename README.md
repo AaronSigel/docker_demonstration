@@ -67,7 +67,29 @@ curl http://localhost:8083/api/version
 
 ## Настройка Jenkins
 
-После первого запуска Jenkins необходимо выполнить первоначальную настройку:
+### Подготовка к запуску
+
+Перед первым запуском Jenkins необходимо получить GID группы Docker для корректного доступа к Docker socket:
+
+```bash
+# Получить GID группы Docker
+export DOCKER_GID=$(stat -c %g /var/run/docker.sock)
+echo "DOCKER_GID=$DOCKER_GID"
+
+# Запустить Jenkins с указанием GID
+DOCKER_GID=$DOCKER_GID docker compose up -d --build jenkins
+```
+
+Важно: если `DOCKER_GID` не задан, `docker compose` подставит пустое значение и Jenkins может получить `permission denied` при доступе к `/var/run/docker.sock`.
+
+Или установить переменную окружения в `.env` файл:
+
+```bash
+echo "DOCKER_GID=$(stat -c %g /var/run/docker.sock)" > .env
+docker compose up -d --build jenkins
+```
+
+### Первоначальная настройка Jenkins
 
 1. Откройте http://localhost:8080
 2. Получите начальный пароль администратора:
@@ -78,29 +100,95 @@ docker compose exec jenkins cat /var/jenkins_home/secrets/initialAdminPassword
 
 3. Установите рекомендуемые плагины
 4. Создайте администратора
-5. Установите необходимые плагины:
+5. Установите необходимые плагины (Manage Jenkins → Plugins → Available):
    - **Pipeline** (обычно уже установлен)
-   - **Docker Pipeline** (для работы с Docker)
    - **Git** (для работы с Git репозиториями)
+   - **GitHub Branch Source** (для Multibranch Pipeline и webhook)
 
-6. Настройте доступ Jenkins к Docker:
-   - Jenkins уже имеет доступ к Docker socket через volume mount
-   - Убедитесь, что Jenkins запущен с правами root (уже настроено в docker-compose.yml)
+### Настройка Credentials (для private репозиториев)
 
-7. Создайте новый Pipeline Job:
-   - New Item → Pipeline
-   - Название: `microservices-pipeline`
-   - В разделе Pipeline:
-     - Definition: Pipeline script from SCM
-     - SCM: Git
-     - Repository URL: `https://github.com/AaronSigel/docker_demonstration.git` (или ваш URL)
-     - Branch: `*/main`
-     - Script Path: `Jenkinsfile`
+Если репозиторий приватный, необходимо создать GitHub Personal Access Token (PAT):
 
-8. Настройте автоматический запуск (опционально):
-   - В настройках Job → Build Triggers
-   - Выберите "Poll SCM" и укажите `H/5 * * * *` (каждые 5 минут)
-   - Или настройте webhook в GitHub/GitLab для автоматического запуска при push
+1. В GitHub: Settings → Developer settings → Personal access tokens → Tokens (classic)
+2. Создайте токен с правами `repo` (для private репо)
+3. В Jenkins: Manage Jenkins → Credentials → System → Global credentials → Add Credentials
+   - Kind: `Secret text`
+   - Secret: вставьте ваш PAT
+   - ID: `github-pat` (или другое имя)
+   - Description: `GitHub Personal Access Token`
+
+### Создание Multibranch Pipeline
+
+1. New Item → Multibranch Pipeline
+2. Название: `microservices-pipeline`
+3. Branch Sources → Add source → GitHub
+   - Credentials: выберите созданный PAT (для private репо) или оставьте пустым (для public)
+   - Owner: ваш GitHub username или organization
+   - Repository: название репозитория
+   - Behaviours: оставить по умолчанию
+4. Build Configuration:
+   - Mode: `by Jenkinsfile`
+   - Script Path: `Jenkinsfile`
+5. Scan Multibranch Pipeline Triggers:
+   - Выберите "Periodically if not otherwise run"
+   - Interval: `1 hour` (fallback, если webhook не работает)
+
+### Настройка Webhook (для автоматического запуска при push)
+
+Так как Jenkins запущен локально, для работы webhook необходимо сделать его доступным извне. Есть два варианта:
+
+#### Вариант 1: ngrok (рекомендуется для демо)
+
+1. Установите ngrok: https://ngrok.com/download
+2. Запустите туннель:
+
+```bash
+ngrok http 8080
+```
+
+3. Скопируйте HTTPS URL (например, `https://abc123.ngrok.io`)
+4. В GitHub: Settings → Webhooks → Add webhook
+   - Payload URL: `https://abc123.ngrok.io/github-webhook/`
+   - Content type: `application/json`
+   - Events: `Just the push event`
+   - Active: ✓
+5. В Jenkins: настройте GitHub Branch Source с включённым webhook (обычно включён по умолчанию)
+
+**Важно**: URL ngrok меняется при каждом перезапуске. Для постоянного использования рассмотрите платный план с фиксированным доменом.
+
+#### Вариант 2: Cloudflare Tunnel
+
+Альтернатива ngrok с возможностью бесплатного фиксированного домена:
+
+1. Установите `cloudflared`: https://developers.cloudflare.com/cloudflare-one/connections/connect-apps/install-and-setup/installation/
+2. Создайте туннель:
+
+```bash
+cloudflared tunnel --url http://localhost:8080
+```
+
+3. Используйте полученный URL в настройках GitHub webhook аналогично ngrok
+
+#### Вариант 3: Poll SCM (fallback, если webhook невозможен)
+
+Если webhook настроить невозможно, используйте Poll SCM:
+
+1. В настройках Multibranch Pipeline → Scan Multibranch Pipeline Triggers
+2. Выберите "Periodically if not otherwise run"
+3. Interval: `H/5 * * * *` (каждые 5 минут) или `*/5 * * * *` (каждые 5 минут)
+
+### Проверка доступа Jenkins к Docker
+
+После настройки проверьте, что Jenkins может выполнять Docker команды:
+
+1. В Jenkins: Manage Jenkins → Script Console
+2. Выполните:
+
+```groovy
+sh 'docker ps'
+```
+
+Если команда выполняется без ошибок `permission denied`, доступ настроен корректно.
 
 ## Демонстрационный сценарий
 
@@ -252,6 +340,6 @@ docker compose restart workspace-service
 
 ```bash
 docker network ls
-docker network inspect final_task_default
+docker network inspect microservices_net
 ```
 

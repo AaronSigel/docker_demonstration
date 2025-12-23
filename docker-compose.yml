@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   workspace-service:
     build:
@@ -84,7 +82,9 @@ services:
       - prometheus
 
   jenkins:
-    image: jenkins/jenkins:lts
+    build:
+      context: ./infra/jenkins
+      dockerfile: Dockerfile
     container_name: jenkins
     ports:
       - "8080:8080"
@@ -92,16 +92,18 @@ services:
     volumes:
       - jenkins_data:/var/jenkins_home
       - /var/run/docker.sock:/var/run/docker.sock
-      - ./infra/jenkins/Jenkinsfile:/var/jenkins_home/Jenkinsfile
     networks:
       - microservices
     environment:
       - DOCKER_HOST=unix:///var/run/docker.sock
+    group_add:
+      # GID группы docker на хосте (нужен для доступа к /var/run/docker.sock без permission denied)
+      - "${DOCKER_GID:?Нужно задать DOCKER_GID. Выполните: export DOCKER_GID=$(stat -c %g /var/run/docker.sock)}"
     restart: unless-stopped
-    user: root
 
 networks:
   microservices:
+    name: microservices_net
     driver: bridge
 
 volumes:

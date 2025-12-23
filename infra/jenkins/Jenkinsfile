@@ -2,7 +2,9 @@ pipeline {
     agent any
 
     environment {
-        COMPOSE_PROJECT_NAME = 'final_task'
+        COMPOSE_PROJECT_NAME = 'demo'
+        NETWORK_NAME = 'microservices_net'
+        APP_SERVICES = 'workspace-service booking-service payment-service'
     }
 
     stages {
@@ -15,26 +17,26 @@ pipeline {
 
         stage('Build') {
             steps {
-                echo 'Building Docker images...'
-                sh '''
-                    docker compose build --no-cache
-                '''
+                echo 'Building Docker images for app services...'
+                sh """
+                    docker compose -p ${COMPOSE_PROJECT_NAME} build --no-cache ${APP_SERVICES}
+                """
             }
         }
 
         stage('Deploy') {
             steps {
-                echo 'Deploying services...'
-                sh '''
-                    docker compose up -d --build
+                echo 'Deploying app services...'
+                sh """
+                    docker compose -p ${COMPOSE_PROJECT_NAME} up -d ${APP_SERVICES}
                     sleep 30
-                '''
+                """
             }
         }
 
         stage('Smoke Tests') {
             steps {
-                echo 'Running smoke tests...'
+                echo 'Running smoke tests through Docker network...'
                 script {
                     def services = [
                         ['name': 'workspace-service', 'port': '8081'],
@@ -45,14 +47,16 @@ pipeline {
                     services.each { service ->
                         echo "Testing ${service.name}..."
                         
-                        // Health check
+                        // Health check через docker-сеть
                         sh """
-                            curl -f -s http://localhost:${service.port}/actuator/health || exit 1
+                            docker run --rm --network ${NETWORK_NAME} curlimages/curl:latest \
+                                -f -s http://${service.name}:${service.port}/actuator/health || exit 1
                         """
                         
-                        // Version check
+                        // Version check через docker-сеть
                         sh """
-                            curl -f -s http://localhost:${service.port}/api/version || exit 1
+                            docker run --rm --network ${NETWORK_NAME} curlimages/curl:latest \
+                                -f -s http://${service.name}:${service.port}/api/version || exit 1
                         """
                         
                         echo "${service.name} is UP"

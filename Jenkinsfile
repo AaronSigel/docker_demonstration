@@ -2,7 +2,15 @@ pipeline {
     agent any
 
     environment {
-        COMPOSE_PROJECT_NAME = 'final_task'
+        COMPOSE_PROJECT_NAME = 'demo'
+        NETWORK_NAME = 'microservices_net'
+        APP_SERVICES = 'workspace-service booking-service payment-service'
+    }
+
+    options {
+        // Чтобы деплой не конфликтовал сам с собой при нескольких событиях подряд (push/webhook/polling)
+        disableConcurrentBuilds()
+        timestamps()
     }
 
     stages {
@@ -15,26 +23,27 @@ pipeline {
 
         stage('Build') {
             steps {
-                echo 'Building Docker images...'
-                sh '''
-                    docker compose build --no-cache
-                '''
+                echo 'Building Docker images for app services...'
+                sh """
+                    set -euo pipefail
+                    docker compose -p ${COMPOSE_PROJECT_NAME} build ${APP_SERVICES}
+                """
             }
         }
 
         stage('Deploy') {
             steps {
-                echo 'Deploying services...'
-                sh '''
-                    docker compose up -d --build
-                    sleep 30
-                '''
+                echo 'Deploying app services...'
+                sh """
+                    set -euo pipefail
+                    docker compose -p ${COMPOSE_PROJECT_NAME} up -d ${APP_SERVICES}
+                """
             }
         }
 
         stage('Smoke Tests') {
             steps {
-                echo 'Running smoke tests...'
+                echo 'Running smoke tests through Docker network...'
                 script {
                     def services = [
                         ['name': 'workspace-service', 'port': '8081'],
@@ -44,17 +53,35 @@ pipeline {
 
                     services.each { service ->
                         echo "Testing ${service.name}..."
-                        
-                        // Health check
+
+                        // Важно: НЕ используем localhost внутри контейнера Jenkins.
+                        // Проверки выполняются через отдельный curl-контейнер в общей docker-сети.
+                        // Добавлен retry, т.к. сервис может быть ещё в прогреве после up -d.
                         sh """
-                            curl -f -s http://localhost:${service.port}/actuator/health || exit 1
+                            set -euo pipefail
+                            for i in \$(seq 1 30); do
+                              docker run --rm --network ${NETWORK_NAME} curlimages/curl:8.5.0 \
+                                --connect-timeout 2 --max-time 5 -fsS \
+                                http://${service.name}:${service.port}/actuator/health >/dev/null && break
+                              if [ "\$i" -eq 30 ]; then
+                                echo "Healthcheck timeout for ${service.name}"
+                                exit 1
+                              fi
+                              sleep 2
+                            done
+
+                            for i in \$(seq 1 30); do
+                              docker run --rm --network ${NETWORK_NAME} curlimages/curl:8.5.0 \
+                                --connect-timeout 2 --max-time 5 -fsS \
+                                http://${service.name}:${service.port}/api/version >/dev/null && break
+                              if [ "\$i" -eq 30 ]; then
+                                echo "Version check timeout for ${service.name}"
+                                exit 1
+                              fi
+                              sleep 2
+                            done
                         """
-                        
-                        // Version check
-                        sh """
-                            curl -f -s http://localhost:${service.port}/api/version || exit 1
-                        """
-                        
+
                         echo "${service.name} is UP"
                     }
                 }
