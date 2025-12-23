@@ -65,6 +65,31 @@ curl http://localhost:8082/api/version
 curl http://localhost:8083/api/version
 ```
 
+## Автоматический деплой через Jenkins
+
+### Обзор настройки
+
+Проект настроен для автоматического деплоя через Jenkins Pipeline с использованием **polling SCM** (без webhook):
+
+- **Автозапуск сборки**: Jenkins проверяет репозиторий каждую минуту на наличие новых коммитов
+- **Автоматический деплой**: При успешной сборке выполняется деплой app-сервисов через `docker compose`
+- **Smoke-тесты**: После деплоя автоматически проверяются health и version endpoints всех сервисов
+- **Изоляция Jenkins**: Jenkins не перезапускается при деплое (деплойятся только app-сервисы)
+
+### Архитектура Pipeline
+
+Pipeline состоит из следующих stages:
+
+1. **Checkout** - получение кода из репозитория
+2. **Preflight** - проверка доступности Docker и Docker Compose
+3. **Build** - сборка Docker образов для app-сервисов (`workspace-service`, `booking-service`, `payment-service`)
+4. **Deploy** - поднятие/обновление контейнеров через `docker compose up -d`
+5. **Smoke Tests** - проверка доступности сервисов через Docker сеть
+
+После завершения pipeline (в блоке `post`) выводятся:
+- Статус всех контейнеров
+- Последние 200 строк логов каждого app-сервиса
+
 ## Настройка Jenkins
 
 ### Подготовка к запуску
@@ -117,65 +142,64 @@ docker compose exec jenkins cat /var/jenkins_home/secrets/initialAdminPassword
    - ID: `github-pat` (или другое имя)
    - Description: `GitHub Personal Access Token`
 
-### Создание Multibranch Pipeline
+### Создание Pipeline Job с автоматическим polling SCM
 
-1. New Item → Multibranch Pipeline
-2. Название: `microservices-pipeline`
-3. Branch Sources → Add source → GitHub
-   - Credentials: выберите созданный PAT (для private репо) или оставьте пустым (для public)
-   - Owner: ваш GitHub username или organization
-   - Repository: название репозитория
-   - Behaviours: оставить по умолчанию
-4. Build Configuration:
-   - Mode: `by Jenkinsfile`
-   - Script Path: `Jenkinsfile`
-5. Scan Multibranch Pipeline Triggers:
-   - Выберите "Periodically if not otherwise run"
-   - Interval: `1 hour` (fallback, если webhook не работает)
+Настройка Pipeline job для автоматического обнаружения новых коммитов через polling (без webhook):
 
-### Настройка Webhook (для автоматического запуска при push)
+1. **Создание Pipeline job:**
+   - New Item → Pipeline
+   - Название: `microservices-pipeline` (или любое другое)
+   - Нажмите OK
 
-Так как Jenkins запущен локально, для работы webhook необходимо сделать его доступным извне. Есть два варианта:
+2. **Настройка Pipeline:**
+   - В разделе "Pipeline":
+     - Definition: `Pipeline script from SCM`
+     - SCM: `Git`
+     - Repositories:
+       - Repository URL: URL вашего GitHub репозитория (например, `https://github.com/username/repo.git`)
+       - Credentials: выберите созданный PAT (для private репо) или оставьте пустым (для public)
+     - Branches to build:
+       - Branch Specifier: `*/main` (или `*/master`, в зависимости от вашей основной ветки)
+     - Script Path: `Jenkinsfile`
 
-#### Вариант 1: ngrok (рекомендуется для демо)
+3. **Важно: НЕ включайте Poll SCM в UI!**
+   - В разделе "Build Triggers" **НЕ** ставьте галочку "Poll SCM"
+   - Polling настроен непосредственно в `Jenkinsfile` через `triggers { pollSCM('H/1 * * * *') }`
+   - Это предотвращает конфликт между UI и Jenkinsfile
 
-1. Установите ngrok: https://ngrok.com/download
-2. Запустите туннель:
+4. Сохраните настройки (Save)
 
-```bash
-ngrok http 8080
+### Проверка работы Polling SCM
+
+После создания job Jenkins начнёт автоматически проверять репозиторий каждую минуту на наличие новых коммитов.
+
+**Проверка Polling Log:**
+
+1. Откройте созданный job в Jenkins
+2. Перейдите в "Polling Log" (ссылка в левом меню)
+3. Вы увидите историю проверок репозитория:
+   - Если есть новые коммиты → сборка запустится автоматически
+   - Если изменений нет → сборка не запустится
+
+**Пример вывода Polling Log:**
+```
+Started on [дата и время]
+Polling [URL репозитория]
+Done. Took [время] ms. No changes
 ```
 
-3. Скопируйте HTTPS URL (например, `https://abc123.ngrok.io`)
-4. В GitHub: Settings → Webhooks → Add webhook
-   - Payload URL: `https://abc123.ngrok.io/github-webhook/`
-   - Content type: `application/json`
-   - Events: `Just the push event`
-   - Active: ✓
-5. В Jenkins: настройте GitHub Branch Source с включённым webhook (обычно включён по умолчанию)
+или
 
-**Важно**: URL ngrok меняется при каждом перезапуске. Для постоянного использования рассмотрите платный план с фиксированным доменом.
-
-#### Вариант 2: Cloudflare Tunnel
-
-Альтернатива ngrok с возможностью бесплатного фиксированного домена:
-
-1. Установите `cloudflared`: https://developers.cloudflare.com/cloudflare-one/connections/connect-apps/install-and-setup/installation/
-2. Создайте туннель:
-
-```bash
-cloudflared tunnel --url http://localhost:8080
+```
+Started on [дата и время]
+Polling [URL репозитория]
+Changes found
 ```
 
-3. Используйте полученный URL в настройках GitHub webhook аналогично ngrok
+**Ручной запуск сборки:**
 
-#### Вариант 3: Poll SCM (fallback, если webhook невозможен)
-
-Если webhook настроить невозможно, используйте Poll SCM:
-
-1. В настройках Multibranch Pipeline → Scan Multibranch Pipeline Triggers
-2. Выберите "Periodically if not otherwise run"
-3. Interval: `H/5 * * * *` (каждые 5 минут) или `*/5 * * * *` (каждые 5 минут)
+Для проверки pipeline без ожидания polling:
+- Откройте job → "Build Now"
 
 ### Проверка доступа Jenkins к Docker
 
@@ -219,37 +243,82 @@ curl -X POST http://localhost:8082/api/bookings -H "Content-Type: application/js
 curl -X POST http://localhost:8083/api/payments -H "Content-Type: application/json" -d '{"bookingId":1,"amount":100.50}'
 ```
 
-### 3. Изменение версии и автоматический деплой
+### 3. Проверка автоматического деплоя через polling SCM
 
-1. Измените версию в одном из сервисов (например, в `services/workspace-service/src/main/resources/application.properties`):
-   ```properties
-   app.version=1.0.1
+#### 3.1 Тестирование автоматического запуска сборки
+
+1. **Внесите изменения в репозиторий:**
+   - Измените версию в одном из сервисов (например, в `services/workspace-service/src/main/resources/application.properties`):
+     ```properties
+     app.version=1.0.1
+     ```
+
+2. **Закоммитьте и отправьте изменения:**
+   ```bash
+   git add .
+   git commit -m "Update version to 1.0.1"
+   git push origin main
    ```
 
-2. Закоммитьте изменения:
+3. **Ожидание автоматического запуска:**
+   - Jenkins автоматически обнаружит новый коммит в течение ≤ 1 минуты (polling каждую минуту)
+   - Откройте http://localhost:8080 → выберите job `microservices-pipeline`
+   - В списке сборок появится новая сборка (статус: "In progress" или "Building")
 
+4. **Мониторинг выполнения pipeline:**
+   - Откройте запущенную сборку
+   - Pipeline выполнит следующие stages:
+     - **Checkout**: получение кода из репозитория
+     - **Preflight**: проверка доступности Docker и Docker Compose
+     - **Build**: сборка Docker образов для app-сервисов
+     - **Deploy**: поднятие/обновление контейнеров через `docker compose up -d`
+     - **Smoke Tests**: проверка health и version endpoints для каждого сервиса
+
+5. **Проверка результата деплоя:**
+
+   **Статус контейнеров:**
+   ```bash
+   docker compose -p demo ps
+   ```
+   Все app-сервисы должны быть в состоянии `Up` (jenkins, prometheus, grafana не должны перезапускаться)
+
+   **Проверка версии сервиса:**
+   ```bash
+   curl http://localhost:8081/api/version
+   ```
+   Должна вернуться обновлённая версия `1.0.1`
+
+   **Проверка health endpoints:**
+   ```bash
+   curl http://localhost:8081/actuator/health
+   curl http://localhost:8082/actuator/health
+   curl http://localhost:8083/actuator/health
+   ```
+
+#### 3.2 Проверка Polling Log
+
+Для подтверждения, что polling работает корректно:
+
+1. В Jenkins: откройте job `microservices-pipeline`
+2. Нажмите "Polling Log" в левом меню
+3. Проверьте последние записи:
+   - Должны быть записи каждую минуту
+   - После `git push` должна появиться запись "Changes found" и автоматически запуститься сборка
+
+#### 3.3 Проверка логов после деплоя
+
+После успешного завершения pipeline:
+
+1. В Jenkins: откройте завершённую сборку
+2. В разделе "Post-build actions" (в конце логов) будут выведены:
+   - Статус всех контейнеров (`docker compose ps`)
+   - Последние 200 строк логов каждого app-сервиса
+
+Также можно проверить логи напрямую:
 ```bash
-git add .
-git commit -m "Update version to 1.0.1"
-git push origin main
-```
-
-3. Запустите pipeline в Jenkins:
-   - Откройте http://localhost:8080
-   - Выберите job `microservices-pipeline`
-   - Нажмите "Build Now"
-   - Или дождитесь автоматического запуска (если настроен polling/webhook)
-
-4. Pipeline выполнит:
-   - Checkout репозитория
-   - Build (сборка Docker образов)
-   - Deploy (перезапуск через docker compose)
-   - Smoke tests (проверка health и version)
-
-5. Проверьте обновление версии:
-
-```bash
-curl http://localhost:8081/api/version
+docker compose -p demo logs --tail=50 workspace-service
+docker compose -p demo logs --tail=50 booking-service
+docker compose -p demo logs --tail=50 payment-service
 ```
 
 ### 4. Просмотр метрик
