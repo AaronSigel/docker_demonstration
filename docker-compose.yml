@@ -57,3 +57,8 @@ networks:
 # DOCKER_GID=$DOCKER_GID docker compose -f docker-compose.infra.yml up -d --build
 
 # docker compose -f docker-compose.infra.yml ps
+
+# export DOCKER_GID=$(stat -c %g /var/run/docker.sock)
+# docker compose -f docker-compose.infra.yml build jenkins --no-cache
+# docker compose -f docker-compose.infra.yml up -d --force-recreate jenkins
+# docker compose -f docker-compose.infra.yml exec jenkins git config --system --get-all safe.directory
