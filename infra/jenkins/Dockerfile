@@ -32,6 +32,9 @@ RUN apt-get update && \
     && apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
+# Git 2.35+: safe.directory для workspace (применяется при любом HOME в pipeline)
+RUN git config --system --add safe.directory '*'
+
 # Копирование скрипта для исправления прав
 COPY fix-permissions.sh /usr/local/bin/fix-permissions.sh
 RUN chmod +x /usr/local/bin/fix-permissions.sh
