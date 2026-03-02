@@ -86,11 +86,13 @@ services:
       context: ./infra/jenkins
       dockerfile: Dockerfile
     container_name: jenkins
+    user: root
+    privileged: true
     ports:
       - "8080:8080"
       - "50000:50000"
     volumes:
-      - jenkins_data:/var/jenkins_home
+      - jenkins_home:/var/jenkins_home
       - /var/run/docker.sock:/var/run/docker.sock
     networks:
       - microservices
@@ -101,6 +103,29 @@ services:
       - "${DOCKER_GID:?Нужно задать DOCKER_GID. Выполните: export DOCKER_GID=$(stat -c %g /var/run/docker.sock)}"
     restart: unless-stopped
 
+  jenkins-agent:
+    build:
+      context: ./infra/jenkins
+      dockerfile: Dockerfile.agent
+    image: jenkins/inbound-agent-docker
+    container_name: jenkins-agent
+    privileged: true
+    environment:
+      - JENKINS_URL=http://jenkins:8080
+      - JENKINS_AGENT_NAME=agent
+      - JENKINS_AGENT_WORKDIR=/home/jenkins/agent
+      - JENKINS_SECRET=449fe29e063c8a0d3080fe798748c7524616a7b6d8c0c236c167deb8dfbf681e
+      - DOCKER_HOST=unix:///var/run/docker.sock
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - agent_workdir:/home/jenkins/agent
+    group_add:
+      - "${DOCKER_GID:?Нужно задать DOCKER_GID. Выполните: export DOCKER_GID=$(stat -c %g /var/run/docker.sock)}"
+    depends_on:
+      - jenkins
+    networks:
+      - microservices
+
 networks:
   microservices:
     name: microservices_net
@@ -109,5 +134,6 @@ networks:
 volumes:
   prometheus_data:
   grafana_data:
-  jenkins_data:
+  jenkins_home:
+  agent_workdir:
 

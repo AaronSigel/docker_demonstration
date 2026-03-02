@@ -27,12 +27,17 @@ public class PaymentController {
     private String buildCommit;
 
     @PostMapping("/payments")
-    public ResponseEntity<Payment> createPayment(@RequestBody PaymentRequest request) {
-        Payment payment = paymentService.createPayment(
-            request.getBookingId(),
-            request.getAmount()
-        );
-        return ResponseEntity.status(HttpStatus.CREATED).body(payment);
+    public ResponseEntity<?> createPayment(@RequestBody PaymentRequest request) {
+        try {
+            Payment payment = paymentService.createPayment(
+                request.getBookingId(),
+                request.getAmount()
+            );
+            return ResponseEntity.status(HttpStatus.CREATED).body(payment);
+        } catch (RuntimeException e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                .body("Ошибка при обработке платежа: " + e.getMessage());
+        }
     }
 
     @GetMapping("/payments/{id}")

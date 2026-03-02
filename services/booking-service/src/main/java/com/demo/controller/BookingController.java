@@ -27,12 +27,17 @@ public class BookingController {
     private String buildCommit;
 
     @PostMapping("/bookings")
-    public ResponseEntity<Booking> createBooking(@RequestBody BookingRequest request) {
-        Booking booking = bookingService.createBooking(
-            request.getWorkspaceId(),
-            request.getUserId()
-        );
-        return ResponseEntity.status(HttpStatus.CREATED).body(booking);
+    public ResponseEntity<?> createBooking(@RequestBody BookingRequest request) {
+        try {
+            Booking booking = bookingService.createBooking(
+                request.getWorkspaceId(),
+                request.getUserId()
+            );
+            return ResponseEntity.status(HttpStatus.CREATED).body(booking);
+        } catch (RuntimeException e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                .body("Ошибка при создании бронирования: " + e.getMessage());
+        }
     }
 
     @GetMapping("/bookings/{id}")

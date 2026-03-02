@@ -1,0 +1,18 @@
+FROM jenkins/inbound-agent
+
+USER root
+RUN apt-get update && apt-get install -y \
+    docker.io \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN apt-get update && apt-get install -y \
+    docker-compose \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN usermod -aG docker jenkins
+RUN usermod -aG root jenkins
+
+USER jenkins
+WORKDIR /home/jenkins
+
+ENTRYPOINT ["jenkins-agent"]
