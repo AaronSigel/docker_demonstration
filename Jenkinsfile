@@ -20,23 +20,23 @@ pipeline {
         timestamps()
         // Таймаут на весь pipeline (30 минут)
         timeout(time: 30, unit: 'MINUTES')
+        // Отключаем автоматический Checkout SCM — он падает с "not in a git directory"
+        // при переиспользовании/очистке workspace; делаем явный checkout в стадии ниже.
+        skipDefaultCheckout(true)
     }
 
     stages {
         stage('Checkout') {
             steps {
-                echo 'Repository already checked out by Jenkins (Pipeline script from SCM)'
+                // Очищаем workspace, чтобы checkout scm всегда делал полный clone
+                // (избегаем бага плагина "not in a git directory" при переиспользовании workspace)
+                sh 'rm -rf .git .[!.]* * 2>/dev/null || true'
+                checkout scm
                 script {
-                    // Проверяем, что мы в git репозитории
                     sh """
-                        if [ -d .git ]; then
-                            echo "Git repository detected. Current commit:"
-                            git rev-parse HEAD
-                            echo "Current branch:"
-                            git rev-parse --abbrev-ref HEAD
-                        else
-                            echo "WARNING: .git directory not found, but this is expected for Pipeline script from SCM"
-                        fi
+                        echo "Git repository:"
+                        git rev-parse HEAD
+                        git rev-parse --abbrev-ref HEAD
                     """
                 }
             }
