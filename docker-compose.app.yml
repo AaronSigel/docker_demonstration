@@ -3,7 +3,6 @@ services:
     build:
       context: ./services/workspace-service
       dockerfile: Dockerfile
-    container_name: workspace-service
     ports:
       - "8081:8081"
     networks:
@@ -19,7 +18,6 @@ services:
     build:
       context: ./services/booking-service
       dockerfile: Dockerfile
-    container_name: booking-service
     ports:
       - "8082:8082"
     networks:
@@ -35,7 +33,6 @@ services:
     build:
       context: ./services/payment-service
       dockerfile: Dockerfile
-    container_name: payment-service
     ports:
       - "8083:8083"
     networks:
