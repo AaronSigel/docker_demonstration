@@ -1,0 +1,90 @@
+services:
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./infra/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+    networks:
+      - microservices
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana
+    ports:
+      - "3000:3000"
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./infra/grafana/provisioning:/etc/grafana/provisioning
+      - ./infra/grafana/dashboards:/var/lib/grafana/dashboards
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+    networks:
+      - microservices
+    restart: unless-stopped
+    depends_on:
+      - prometheus
+
+  jenkins:
+    build:
+      context: ./infra/jenkins
+      dockerfile: Dockerfile
+    container_name: jenkins
+    user: root
+    privileged: true
+    ports:
+      - "8080:8080"
+      - "50000:50000"
+    volumes:
+      - jenkins_home:/var/jenkins_home
+      - /var/run/docker.sock:/var/run/docker.sock
+    networks:
+      - microservices
+    environment:
+      - DOCKER_HOST=unix:///var/run/docker.sock
+    group_add:
+      # GID группы docker на хосте (нужен для доступа к /var/run/docker.sock без permission denied)
+      - "${DOCKER_GID:?Нужно задать DOCKER_GID. Выполните: export DOCKER_GID=$(stat -c %g /var/run/docker.sock)}"
+    restart: unless-stopped
+
+  jenkins-agent:
+    build:
+      context: ./infra/jenkins
+      dockerfile: Dockerfile.agent
+    image: jenkins/inbound-agent-docker
+    container_name: jenkins-agent
+    privileged: true
+    environment:
+      - JENKINS_URL=http://jenkins:8080
+      - JENKINS_AGENT_NAME=agent
+      - JENKINS_AGENT_WORKDIR=/home/jenkins/agent
+      - JENKINS_SECRET=449fe29e063c8a0d3080fe798748c7524616a7b6d8c0c236c167deb8dfbf681e
+      - DOCKER_HOST=unix:///var/run/docker.sock
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - agent_workdir:/home/jenkins/agent
+    group_add:
+      - "${DOCKER_GID:?Нужно задать DOCKER_GID. Выполните: export DOCKER_GID=$(stat -c %g /var/run/docker.sock)}"
+    depends_on:
+      - jenkins
+    networks:
+      - microservices
+
+networks:
+  microservices:
+    name: microservices_net
+    driver: bridge
+
+volumes:
+  prometheus_data:
+  grafana_data:
+  jenkins_home:
+  agent_workdir:

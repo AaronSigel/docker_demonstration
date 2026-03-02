@@ -8,7 +8,7 @@ pipeline {
 
     environment {
         COMPOSE_PROJECT_NAME = 'demo'
-        COMPOSE_FILE = 'docker-compose.yml'
+        COMPOSE_FILE = 'docker-compose.app.yml'
         NETWORK_NAME = 'microservices_net'
         APP_SERVICES = 'workspace-service booking-service payment-service'
     }

@@ -29,13 +29,18 @@
 ### Запуск стенда
 
 ```bash
-docker compose up -d --build
+# Инфраструктура (Jenkins, Prometheus, Grafana)
+docker compose -f docker-compose.infra.yml up -d --build
+
+# App-сервисы (workspace/booking/payment)
+docker compose -f docker-compose.app.yml up -d --build
 ```
 
 Ожидание полного запуска всех сервисов (около 1-2 минут):
 
 ```bash
-docker compose ps
+docker compose -f docker-compose.infra.yml ps
+docker compose -f docker-compose.app.yml ps
 ```
 
 ### URL сервисов
@@ -72,7 +77,7 @@ curl http://localhost:8083/api/version
 Проект настроен для автоматического деплоя через Jenkins Pipeline с использованием **polling SCM** (без webhook):
 
 - **Автозапуск сборки**: Jenkins проверяет репозиторий каждую минуту на наличие новых коммитов
-- **Автоматический деплой**: При успешной сборке выполняется деплой app-сервисов через `docker compose`
+- **Автоматический деплой**: При успешной сборке выполняется деплой app-сервисов через `docker compose -f docker-compose.app.yml`
 - **Smoke-тесты**: После деплоя автоматически проверяются health и version endpoints всех сервисов
 - **Изоляция Jenkins**: Jenkins не перезапускается при деплое (деплойятся только app-сервисы)
 
@@ -83,7 +88,7 @@ Pipeline состоит из следующих stages:
 1. **Checkout** - получение кода из репозитория
 2. **Preflight** - проверка доступности Docker и Docker Compose
 3. **Build** - сборка Docker образов для app-сервисов (`workspace-service`, `booking-service`, `payment-service`)
-4. **Deploy** - поднятие/обновление контейнеров через `docker compose up -d`
+4. **Deploy** - поднятие/обновление контейнеров через `docker compose -f docker-compose.app.yml up -d`
 5. **Smoke Tests** - проверка доступности сервисов через Docker сеть
 
 После завершения pipeline (в блоке `post`) выводятся:
@@ -94,18 +99,11 @@ Pipeline состоит из следующих stages:
 
 ### Подготовка к запуску
 
-Jenkins настроен для запуска от root (для демо-окружения), что обеспечивает доступ к Docker socket без дополнительных настроек прав.
+Jenkins запускается из отдельного compose-файла `docker-compose.infra.yml`.
+Чтобы избежать ошибки интерполяции переменных и обеспечить доступ к Docker socket,
+необходимо задать `DOCKER_GID` (GID группы docker на хосте).
 
 **Запуск Jenkins:**
-
-```bash
-# Простой запуск (DOCKER_GID не требуется, т.к. Jenkins запускается от root)
-docker compose up -d --build jenkins
-```
-
-**Примечание:** В продакшене рекомендуется использовать запуск от пользователя `jenkins` с правильной настройкой `group_add` и `DOCKER_GID`. Для демо-окружения запуск от root упрощает настройку.
-
-**Если нужно использовать запуск от пользователя jenkins (альтернативный вариант):**
 
 ```bash
 # Получить GID группы Docker
@@ -113,22 +111,28 @@ export DOCKER_GID=$(stat -c %g /var/run/docker.sock)
 echo "DOCKER_GID=$DOCKER_GID"
 
 # Запустить Jenkins с указанием GID
-DOCKER_GID=$DOCKER_GID docker compose up -d --build jenkins
+DOCKER_GID=$DOCKER_GID docker compose -f docker-compose.infra.yml up -d --build jenkins
 ```
 
 Или установить переменную окружения в `.env` файл:
 
 ```bash
 echo "DOCKER_GID=$(stat -c %g /var/run/docker.sock)" > .env
-docker compose up -d --build jenkins
+docker compose -f docker-compose.infra.yml up -d --build jenkins
 ```
 
-**Важно:** Если Jenkins уже запущен и вы обновили `fix-permissions.sh`, необходимо пересобрать контейнер:
+**Запуск всей инфраструктуры (Jenkins + Prometheus + Grafana):**
 
 ```bash
-docker compose stop jenkins
-docker compose build jenkins
-docker compose up -d jenkins
+DOCKER_GID=$DOCKER_GID docker compose -f docker-compose.infra.yml up -d --build
+```
+
+**Важно:** Если Jenkins уже запущен и вы обновили `fix-permissions.sh` или compose-файлы, необходимо пересобрать контейнер:
+
+```bash
+docker compose -f docker-compose.infra.yml stop jenkins
+docker compose -f docker-compose.infra.yml build jenkins
+docker compose -f docker-compose.infra.yml up -d jenkins
 ```
 
 ### Первоначальная настройка Jenkins
@@ -137,7 +141,7 @@ docker compose up -d jenkins
 2. Получите начальный пароль администратора:
 
 ```bash
-docker compose exec jenkins cat /var/jenkins_home/secrets/initialAdminPassword
+docker compose -f docker-compose.infra.yml exec jenkins cat /var/jenkins_home/secrets/initialAdminPassword
 ```
 
 3. Установите рекомендуемые плагины
@@ -236,7 +240,11 @@ sh 'docker ps'
 ### 1. Поднятие стенда
 
 ```bash
-docker compose up -d --build
+# Инфраструктура
+DOCKER_GID=$(stat -c %g /var/run/docker.sock) docker compose -f docker-compose.infra.yml up -d --build
+
+# App-сервисы
+docker compose -f docker-compose.app.yml up -d --build
 ```
 
 ### 2. Генерация трафика
@@ -288,14 +296,14 @@ curl -X POST http://localhost:8083/api/payments -H "Content-Type: application/js
      - **Checkout**: получение кода из репозитория
      - **Preflight**: проверка доступности Docker и Docker Compose
      - **Build**: сборка Docker образов для app-сервисов
-     - **Deploy**: поднятие/обновление контейнеров через `docker compose up -d`
+    - **Deploy**: поднятие/обновление контейнеров через `docker compose -f docker-compose.app.yml up -d`
      - **Smoke Tests**: проверка health и version endpoints для каждого сервиса
 
 5. **Проверка результата деплоя:**
 
    **Статус контейнеров:**
    ```bash
-   docker compose -p demo ps
+   docker compose -p demo -f docker-compose.app.yml ps
    ```
    Все app-сервисы должны быть в состоянии `Up` (jenkins, prometheus, grafana не должны перезапускаться)
 
@@ -328,14 +336,14 @@ curl -X POST http://localhost:8083/api/payments -H "Content-Type: application/js
 
 1. В Jenkins: откройте завершённую сборку
 2. В разделе "Post-build actions" (в конце логов) будут выведены:
-   - Статус всех контейнеров (`docker compose ps`)
+   - Статус всех контейнеров (`docker compose -f docker-compose.app.yml ps`)
    - Последние 200 строк логов каждого app-сервиса
 
 Также можно проверить логи напрямую:
 ```bash
-docker compose -p demo logs --tail=50 workspace-service
-docker compose -p demo logs --tail=50 booking-service
-docker compose -p demo logs --tail=50 payment-service
+docker compose -f docker-compose.app.yml logs --tail=50 workspace-service
+docker compose -f docker-compose.app.yml logs --tail=50 booking-service
+docker compose -f docker-compose.app.yml logs --tail=50 payment-service
 ```
 
 ### 4. Просмотр метрик
@@ -368,7 +376,9 @@ docker compose -p demo logs --tail=50 payment-service
         microservices.json # Дашборд с метриками
     jenkins/
       Jenkinsfile          # Pipeline для CI/CD
-  docker-compose.yml       # Оркестрация всех сервисов
+  docker-compose.yml       # App-сервисы (workspace/booking/payment)
+  docker-compose.app.yml   # App-сервисы (используется Jenkins Pipeline)
+  docker-compose.infra.yml # Инфраструктура (jenkins/prometheus/grafana)
   generate-traffic.sh      # Скрипт генерации трафика
   README.md
 ```
@@ -402,24 +412,35 @@ docker compose -p demo logs --tail=50 payment-service
 ## Остановка стенда
 
 ```bash
-docker compose down -v
+docker compose -f docker-compose.app.yml down -v
+docker compose -f docker-compose.infra.yml down -v
 ```
 
 ## Troubleshooting
 
+### Ошибка DOCKER_GID при запуске pipeline
+
+Если в Jenkins появляется ошибка:
+`required variable DOCKER_GID is missing a value`, значит pipeline пытается использовать compose-файл,
+в котором есть сервис `jenkins` с обязательной переменной `DOCKER_GID`.
+
+Решение:
+- Jenkins Pipeline должен использовать `docker-compose.app.yml` (только app-сервисы).
+- Инфраструктура (`jenkins`, `prometheus`, `grafana`) запускается через `docker-compose.infra.yml`.
+
 ### Просмотр логов
 
 ```bash
-docker compose logs -f workspace-service
-docker compose logs -f booking-service
-docker compose logs -f payment-service
-docker compose logs -f jenkins
+docker compose -f docker-compose.app.yml logs -f workspace-service
+docker compose -f docker-compose.app.yml logs -f booking-service
+docker compose -f docker-compose.app.yml logs -f payment-service
+docker compose -f docker-compose.infra.yml logs -f jenkins
 ```
 
 ### Перезапуск сервиса
 
 ```bash
-docker compose restart workspace-service
+docker compose -f docker-compose.app.yml restart workspace-service
 ```
 
 ### Проверка сети Docker
